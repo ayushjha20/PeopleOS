@@ -1,10 +1,11 @@
 
-const API_BASE = " ";
+const API_BASE = "";
 
 const ENDPOINTS = {
-    list: "/api/employee/readall",
+    list: "/api/employee/getall",
     create: "/api/employee/create",
-    update: id => `/api/employee/modify/${id}`,
+    getById: id => `/api/employee/get/${id}`,
+    update: id => `/api/employee/update/get/${id}`,
     remove: id => `/api/employee/delete/${id}`
 };
 
@@ -15,6 +16,7 @@ const pageSize = 6;
 
 const $ = id => document.getElementById(id);
 
+// Escape HTML to prevent user-entered values from becoming markup
 function escapeHTML(value) {
     return String(value ?? "").replace(/[&<>"']/g, char => ({
         "&": "&amp;",
@@ -25,13 +27,14 @@ function escapeHTML(value) {
     })[char]);
 }
 
+// Support the field names returned by your DTO
 function normalize(employee) {
     return {
         id: employee.id,
         name: employee.name ?? "",
         domain: employee.domain ?? "",
-        salary: employee.salary ?? employee.Salary ?? 0,
-        email: employee.email ?? employee.Email ?? ""
+        salary: employee.Salary ?? employee.salary ?? 0,
+        email: employee.Email ?? employee.email ?? ""
     };
 }
 
@@ -45,6 +48,12 @@ function money(value) {
 
 function notify(message) {
     const toast = $("toast");
+
+    if (!toast) {
+        console.log(message);
+        return;
+    }
+
     toast.textContent = message;
     toast.classList.add("show");
 
@@ -53,18 +62,26 @@ function notify(message) {
     }, 3000);
 }
 
+function showFormError(message) {
+    $("formError").textContent = message;
+}
+
+// Centralized API request handler
 async function api(path, options = {}) {
-    const response = await fetch(API_BASE + path, {
+    const response = await fetch(`${API_BASE}${path}`, {
         ...options,
         headers: {
-            "Content-Type": "application/json",
+            ...(options.body ? {
+                "Content-Type": "application/json"
+            } : {}),
             ...(options.headers || {})
         }
     });
 
     const text = await response.text();
 
-    let data;
+    let data = null;
+
     try {
         data = text ? JSON.parse(text) : null;
     } catch {
@@ -82,7 +99,18 @@ async function api(path, options = {}) {
     return data;
 }
 
+// Read all employees
 async function loadEmployees() {
+    const table = $("employeeTable");
+
+    table.innerHTML = `
+        <tr>
+            <td colspan="4" class="empty">
+                Loading employees...
+            </td>
+        </tr>
+    `;
+
     try {
         const data = await api(ENDPOINTS.list);
 
@@ -92,12 +120,14 @@ async function loadEmployees() {
 
         employees = list.map(normalize);
 
+        page = 1;
+
         updateStats();
         updateDomainFilter();
         renderEmployees();
 
     } catch (error) {
-        $("employeeTable").innerHTML = `
+        table.innerHTML = `
             <tr>
                 <td colspan="4" class="empty">
                     Could not load employees.<br>
@@ -107,21 +137,25 @@ async function loadEmployees() {
         `;
 
         notify("Could not connect to Spring Boot.");
+        console.error("Load employees error:", error);
     }
 }
 
+// Dashboard statistics
 function updateStats() {
     $("totalEmployees").textContent = employees.length;
 
     const domains = new Set(
-        employees.map(e => e.domain).filter(Boolean)
+        employees.map(employee => employee.domain).filter(Boolean)
     );
 
     $("totalDomains").textContent = domains.size;
 
     const average = employees.length
-        ? employees.reduce((sum, e) => sum + Number(e.salary), 0)
-            / employees.length
+        ? employees.reduce(
+            (sum, employee) => sum + Number(employee.salary),
+            0
+        ) / employees.length
         : 0;
 
     $("averageSalary").textContent = money(average);
@@ -130,26 +164,34 @@ function updateStats() {
         `${employees.length} records`;
 }
 
+// Populate domain filter
 function updateDomainFilter() {
     const select = $("domainFilter");
     const previous = select.value;
 
-    const domains = [...new Set(
-        employees.map(e => e.domain).filter(Boolean)
-    )].sort();
+    const domains = [
+        ...new Set(
+            employees.map(employee => employee.domain).filter(Boolean)
+        )
+    ].sort();
 
-    select.innerHTML = '<option value="">All domains</option>';
+    select.innerHTML = `
+        <option value="">All domains</option>
+    `;
 
     domains.forEach(domain => {
         const option = document.createElement("option");
+
         option.value = domain;
         option.textContent = domain;
+
         select.appendChild(option);
     });
 
     select.value = domains.includes(previous) ? previous : "";
 }
 
+// Search, filter and sort
 function getFilteredEmployees() {
     const query = $("searchInput").value.toLowerCase().trim();
     const domain = $("domainFilter").value;
@@ -184,12 +226,13 @@ function getFilteredEmployees() {
             return Number(a.salary) - Number(b.salary);
         }
 
-        return a.name.localeCompare(b.name);
+        return String(a.name).localeCompare(String(b.name));
     });
 
     return result;
 }
 
+// Render employee table and pagination
 function renderEmployees() {
     const filtered = getFilteredEmployees();
 
@@ -223,6 +266,7 @@ function renderEmployees() {
                 </td>
             </tr>
         `;
+
         return;
     }
 
@@ -232,6 +276,7 @@ function renderEmployees() {
                 <span class="employee-name">
                     ${escapeHTML(employee.name)}
                 </span>
+
                 <span class="employee-sub">
                     ID: ${escapeHTML(employee.id)}
                     · ${escapeHTML(employee.email)}
@@ -267,6 +312,7 @@ function renderEmployees() {
     `).join("");
 }
 
+// Open add/edit form
 function openForm(employee = null) {
     editingId = employee ? employee.id : null;
 
@@ -287,10 +333,11 @@ function openForm(employee = null) {
     $("empSalary").value = employee?.salary ?? "";
     $("empEmail").value = employee?.email ?? "";
 
+    $("empPassword").value = "";
     $("empPassword").required = !employee;
 
     $("passwordHelp").textContent = employee
-        ? "Leave blank only if your backend supports keeping the existing password."
+        ? "Leave blank only if your backend supports retaining the existing password."
         : "Required when creating an employee.";
 
     $("modalBackdrop").classList.add("open");
@@ -300,10 +347,7 @@ function closeForm() {
     $("modalBackdrop").classList.remove("open");
 }
 
-function showFormError(message) {
-    $("formError").textContent = message;
-}
-
+// Create or update employee
 $("employeeForm").addEventListener("submit", async event => {
     event.preventDefault();
 
@@ -330,7 +374,7 @@ $("employeeForm").addEventListener("submit", async event => {
         return showFormError("Enter a valid email.");
     }
 
-    if (!editingId && !password) {
+    if (editingId === null && !password) {
         return showFormError("Password is required.");
     }
 
@@ -343,7 +387,8 @@ $("employeeForm").addEventListener("submit", async event => {
         password
     };
 
-    if (editingId && !password) {
+    // Do not send an empty password during edit
+    if (editingId !== null && !password) {
         delete payload.password;
     }
 
@@ -374,6 +419,8 @@ $("employeeForm").addEventListener("submit", async event => {
 
     } catch (error) {
         showFormError(error.message);
+        console.error("Save employee error:", error);
+
     } finally {
         $("saveBtn").disabled = false;
 
@@ -384,6 +431,7 @@ $("employeeForm").addEventListener("submit", async event => {
     }
 });
 
+// Delete employee
 async function deleteEmployee(id) {
     const employee = employees.find(
         e => String(e.id) === String(id)
@@ -406,9 +454,11 @@ async function deleteEmployee(id) {
 
     } catch (error) {
         notify(`Delete failed: ${error.message}`);
+        console.error("Delete employee error:", error);
     }
 }
 
+// Handle table buttons
 $("employeeTable").addEventListener("click", event => {
     const editButton = event.target.closest("[data-edit]");
     const deleteButton = event.target.closest("[data-delete]");
@@ -418,7 +468,9 @@ $("employeeTable").addEventListener("click", event => {
             e => String(e.id) === editButton.dataset.edit
         );
 
-        if (employee) openForm(employee);
+        if (employee) {
+            openForm(employee);
+        }
     }
 
     if (deleteButton) {
@@ -426,10 +478,12 @@ $("employeeTable").addEventListener("click", event => {
     }
 });
 
-$("addBtn").onclick =
+// Add employee buttons
+$("addBtn").onclick = () => openForm();
 $("addEmployeeBtn").onclick = () => openForm();
 
-$("closeModal").onclick =
+// Close modal
+$("closeModal").onclick = closeForm;
 $("cancelBtn").onclick = closeForm;
 
 $("modalBackdrop").addEventListener("click", event => {
@@ -438,27 +492,36 @@ $("modalBackdrop").addEventListener("click", event => {
     }
 });
 
+// Refresh
 $("refreshBtn").onclick = loadEmployees;
 
+// Directory navigation
 $("directoryBtn").onclick = () => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({
+        top: 0,
+        behavior: "smooth"
+    });
 };
 
+// Search
 $("searchInput").addEventListener("input", () => {
     page = 1;
     renderEmployees();
 });
 
+// Domain filter
 $("domainFilter").onchange = () => {
     page = 1;
     renderEmployees();
 };
 
+// Sorting
 $("sortSelect").onchange = () => {
     page = 1;
     renderEmployees();
 };
 
+// Pagination
 $("prevBtn").onclick = () => {
     page = Math.max(1, page - 1);
     renderEmployees();
@@ -469,4 +532,5 @@ $("nextBtn").onclick = () => {
     renderEmployees();
 };
 
+// Initial load
 loadEmployees();
