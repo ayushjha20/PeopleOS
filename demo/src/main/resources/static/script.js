@@ -333,12 +333,23 @@ function openForm(employee = null) {
     $("empSalary").value = employee?.salary ?? "";
     $("empEmail").value = employee?.email ?? "";
 
+    // Reset password input each time the form opens
     $("empPassword").value = "";
     $("empPassword").required = !employee;
 
+    // Update password helper text
     $("passwordHelp").textContent = employee
-        ? "Leave blank only if your backend supports retaining the existing password."
+        ? ""
         : "Required when creating an employee.";
+
+    // Hide the ENTIRE password section during editing
+    const passwordGroup = $("passwordGroup");
+
+    if (employee) {
+        passwordGroup.style.display = "none";
+    } else {
+        passwordGroup.style.display = "";
+    }
 
     $("modalBackdrop").classList.add("open");
 }
@@ -378,21 +389,21 @@ $("employeeForm").addEventListener("submit", async event => {
         return showFormError("Password is required.");
     }
 
+    const isEdit = editingId !== null;
+
     const payload = {
         id,
         name,
         domain,
         Salary: salary,
-        Email: email,
-        password
+        Email: email
     };
 
-    // Do not send an empty password during edit
-    if (editingId !== null && !password) {
-        delete payload.password;
+    // Send password only when creating an employee.
+    // It is not editable in the update form.
+    if (!isEdit) {
+        payload.password = password;
     }
-
-    const isEdit = editingId !== null;
 
     $("saveBtn").disabled = true;
 
@@ -416,6 +427,9 @@ $("employeeForm").addEventListener("submit", async event => {
         );
 
         await loadEmployees();
+
+        // Reset editing state after a successful save
+        editingId = null;
 
     } catch (error) {
         showFormError(error.message);
